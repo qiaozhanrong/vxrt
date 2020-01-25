@@ -99,6 +99,7 @@ int main(){
 		}
 	}
 	
+/*
 	Shader mainShader;
 	mainShader.loadFromFile(GL_COMPUTE_SHADER, std::string(ShaderPath) + "Main.csh");
 	ShaderProgram mainProgram;
@@ -106,6 +107,9 @@ int main(){
 	mainProgram.attach(mainShader);
 	mainProgram.link();
 	mainProgram.checkLinking("Shader program linking error:");
+*/
+	
+	ShaderProgram& mainProgram = Renderer::shader();
 
 	// Init voxels
 //	Tree tree(Config::getInt("World.Size", 256), Config::getInt("World.Height", 256));
@@ -177,11 +181,11 @@ int main(){
 			fbo[curr].create(fbWidth, fbHeight, 1, false);
 		}
 		Renderer::setRenderArea(0, 0, fbWidth, fbHeight);
-//		fbo[curr].bind();
+		fbo[curr].bind();
 		fbo[curr ^ 1].bindColorTextures(0);
 		Renderer::clear();
 
-		mainProgram.bind();
+		Renderer::beginFinalPass();
 //		Renderer::setProjection(camera.getProjectionMatrix());
 //		Renderer::setModelview(camera.getModelViewMatrix());
 		mainProgram.setUniformMatrix4fv("ProjectionMatrix", camera.getProjectionMatrix().getTranspose().data);
@@ -210,14 +214,35 @@ int main(){
 		mainProgram.setUniform1i("MaxNodes", MaxNodes);
 
 		// Render scene (sample once for each pixel)
+/*
 		int outimageIndex = 0;
 		mainProgram.setUniform1i("FrameBuffer", outimageIndex);
 		glBindImageTexture(outimageIndex, fbo[curr].colorTextures()[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 		glDispatchCompute((fbWidth - 1) / patchSize + 1, (fbHeight - 1) / patchSize + 1, 1);
 		glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
+*/
+		for (int x = 0; x < rasterChunks; x++) { // Prevent from crashing (timeout)...
+			for (int y = 0; y < rasterChunks; y++) {
+				float xmin = 2.0f / rasterChunks * x - 1.0f;
+				float xmax = xmin + 2.0f / rasterChunks;
+				float ymin = 2.0f / rasterChunks * y - 1.0f;
+				float ymax = ymin + 2.0f / rasterChunks;
+				VertexArray va(6, VertexFormat(0, 0, 0, 2));
+				va.addVertex({xmin, ymax});
+				va.addVertex({xmin, ymin});
+				va.addVertex({xmax, ymax});
+				va.addVertex({xmax, ymax});
+				va.addVertex({xmin, ymin});
+				va.addVertex({xmax, ymin});
+				VertexBuffer(va, false).render();
+				if (rasterChunks != 1) Renderer::waitForComplete();
+			}
+		}
+
+		Renderer::endFinalPass();
 
 		// Present to screen
-//		fbo[curr].unbind();
+		fbo[curr].unbind();
 		fbo[curr].bindColorTextures(0);
 		presenter.bind();
 		Renderer::clear();
@@ -249,6 +274,7 @@ int main(){
 			}
 			Window::getDefaultWindow().setTitle(ss.str());
 			frameCounterScheduler.increase();
+			glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 			unsigned int count = 0;
 			outBuffer.download(sizeof(count), &count);
 			ss.str(""); ss << "Allocated nodes: " << count; LogVerbose(ss.str());
